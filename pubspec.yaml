@@ -1,0 +1,49 @@
+
+name: outils_mesure_app
+description: Une application Flutter modulaire pour autocollants, découpage photo et cotation
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Packages pour la caméra / galerie
+  image_picker: ^1.0.7
+
+  # Traitement et export PNG
+  image: ^4.1.7
+
+  # Calculs géométriques, vecteurs, matrices
+  vector_math: ^2.1.4
+
+  # Pour redresser / manipuler la photo via gestures et matrices
+  # matrix_gesture_detector: ^0.2.1
+
+  # Pour accès aux fichiers locaux (sauvegarde PNG, bibliothèque)
+  path_provider: ^2.1.2
+
+  # Pour JSON et stockage léger (optionnel pour bibliothèque d'éléments)
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Pour UI avancée si besoin
+  flutter_svg: ^2.0.9
+
+  # Device Preview pour tester sur différents appareils
+  device_preview: ^1.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
