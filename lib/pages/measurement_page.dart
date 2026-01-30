@@ -150,9 +150,9 @@ class PerspectiveAdjustmentScreen extends StatefulWidget {
 
 class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScreen> {
   List<Offset> _perspectivePoints = [];
-  bool _showDialog = true;
-  bool _isAdjusting = false;
+  bool _isAdjusting = true; // Démarrer directement en mode ajustement
   bool _isCropping = false;
+  bool _isWorking = false; // Mode de travail après recadrage
   int? _selectedPointIndex;
   
   // Variables pour le recadrage
@@ -161,6 +161,29 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
   double _cropRight = 0;
   double _cropBottom = 0;
   int? _selectedCropEdge; // 0=left, 1=top, 2=right, 3=bottom
+  bool _showCropHandles = true;
+  
+  // Variables pour le mode de travail
+  Color _selectedColor = Colors.red;
+  String? _selectedTool; // 'linear', 'text', 'circular'
+  
+  // Variables pour les cotations
+  List<LinearMeasurement> _linearMeasurements = [];
+  List<Offset> _tempPoints = []; // Points temporaires pendant la sélection
+  int? _draggingMeasurementIndex; // Index de la cotation en cours de déplacement
+  int? _selectedMeasurementIndex; // Index de la cotation sélectionnée
+  
+  // Gestion des noms de cotations
+  int _nameCounter = 0;
+  final List<String> _predefinedNames = [
+    'Longueur',
+    'Largeur',
+    'Hauteur',
+    'Épaisseur',
+    'Profondeur',
+    'Diamètre',
+    'Rayon',
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -169,14 +192,14 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
         // Image avec points de redressement
         Positioned.fill(
           child: Container(
-            color: Colors.black,
+            color: AppTheme.softBlueGrey,
             child: LayoutBuilder(
               builder: (context, constraints) {
                 return GestureDetector(
-                  onTapDown: (_isAdjusting || _isCropping) ? _handleTapDown : null,
-                  onPanStart: (_isAdjusting || _isCropping) ? _handlePanStart : null,
-                  onPanUpdate: (_isAdjusting || _isCropping) ? _handlePanUpdate : null,
-                  onPanEnd: (_isAdjusting || _isCropping) ? _handlePanEnd : null,
+                  onTapDown: (_isAdjusting || _isCropping || _isWorking) ? _handleTapDown : null,
+                  onPanStart: (_isAdjusting || _isCropping || _isWorking) ? _handlePanStart : null,
+                  onPanUpdate: (_isAdjusting || _isCropping || _isWorking) ? _handlePanUpdate : null,
+                  onPanEnd: (_isAdjusting || _isCropping || _isWorking) ? _handlePanEnd : null,
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -184,12 +207,23 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
                         widget.image,
                         fit: BoxFit.contain,
                       ),
+                      if (_isWorking)
+                        CustomPaint(
+                          painter: MeasurementPainter(
+                            linearMeasurements: _linearMeasurements,
+                            tempPoints: _tempPoints,
+                            selectedColor: _selectedColor,
+                            selectedTool: _selectedTool,
+                            selectedIndex: _selectedMeasurementIndex,
+                          ),
+                          size: Size(constraints.maxWidth, constraints.maxHeight),
+                        ),
                       if (_isAdjusting && !_isCropping)
                         CustomPaint(
                           painter: PerspectivePointsPainter(_perspectivePoints, _selectedPointIndex),
                           size: Size(constraints.maxWidth, constraints.maxHeight),
                         ),
-                      if (_isCropping)
+                      if (_isCropping && _showCropHandles)
                         CustomPaint(
                           painter: CropHandlesPainter(
                             _cropLeft,
@@ -210,187 +244,474 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
           ),
         ),
 
-        // Dialogue de confirmation
-        if (_showDialog)
-          _buildConfirmationDialog(),
-
-        // Boutons Valider/Annuler (en mode ajustement)
+        // Bandeau orangé avec boutons (en mode ajustement)
         if (_isAdjusting && !_isCropping)
           Positioned(
-            bottom: 80,
-            left: 20,
-            right: 20,
-            child: Row(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: AppTheme.buildSecondaryButton(
-                    label: 'Annuler',
-                    onPressed: () {
-                      setState(() {
-                        _isAdjusting = false;
-                        _perspectivePoints.clear();
-                        _showDialog = true;
-                      });
-                    },
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: Color(0xFFFFB366),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    _perspectivePoints.length < 4
+                        ? 'Placez 4 points aux coins d\'un rectangle de référence (${_perspectivePoints.length}/4)'
+                        : 'Ajustez les points si nécessaire',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
-                SizedBox(width: 16),
-                Expanded(
-                  child: AppTheme.buildPrimaryButton(
-                    label: 'Valider',
-                    enabled: _perspectivePoints.length == 4,
-                    onPressed: _perspectivePoints.length == 4 ? () async {
-                      await _applyPerspectiveCorrection();
-                    } : () {},
+                Container(
+                  color: Colors.white,
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: AppTheme.buildSecondaryButton(
+                          label: 'Passer',
+                          onPressed: () {
+                            widget.onComplete(widget.image);
+                          },
+                        ),
+                      ),
+                      SizedBox(width: 16),
+                      Expanded(
+                        child: AppTheme.buildPrimaryButton(
+                          label: 'Valider',
+                          enabled: _perspectivePoints.length == 4,
+                          onPressed: _perspectivePoints.length == 4 ? () async {
+                            await _applyPerspectiveCorrection();
+                          } : () {},
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
 
-        // Boutons Valider/Annuler (en mode recadrage)
-        if (_isCropping)
+        // Boutons Valider/Passer (en mode recadrage)
+        if (_isCropping && !_isWorking)
           Positioned(
-            bottom: 80,
-            left: 20,
-            right: 20,
-            child: Row(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: AppTheme.buildSecondaryButton(
-                    label: 'Ignorer',
-                    onPressed: () {
-                      widget.onComplete(widget.image);
-                    },
+                Container(
+                  width: double.infinity,
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: Color(0xFFFFB366),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    'Ajustez les bords pour recadrer l\'image',
+                    style: TextStyle(
+                      color: Colors.black,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
-                SizedBox(width: 16),
-                Expanded(
-                  child: AppTheme.buildPrimaryButton(
-                    label: 'Valider',
-                    onPressed: () async {
-                      await _applyCrop();
-                    },
+                Container(
+                  color: Colors.white,
+                  padding: EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: AppTheme.buildSecondaryButton(
+                          label: 'Passer',
+                          onPressed: () {
+                            widget.onComplete(widget.image);
+                          },
+                        ),
+                      ),
+                      SizedBox(width: 16),
+                      Expanded(
+                        child: AppTheme.buildPrimaryButton(
+                          label: 'Valider',
+                          onPressed: () async {
+                            await _applyCrop();
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
 
-        // Instructions
-        if (_isAdjusting && !_isCropping)
+        // Bandeau d'outils (en mode travail)
+        if (_isWorking)
           Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
+            top: 0,
+            left: 0,
+            right: 0,
             child: Container(
-              padding: EdgeInsets.all(12),
+              height: 60,
               decoration: BoxDecoration(
-                color: AppTheme.navyBlue.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
+                ],
               ),
-              child: Text(
-                _perspectivePoints.length < 4
-                    ? 'Placez les 4 coins d\'un rectangle de référence (${_perspectivePoints.length}/4)\nEx: les 4 coins de votre caisse'
-                    : 'Ajustez les points si nécessaire, puis validez\nL\'image entière sera redressée',
-                style: TextStyle(color: Colors.white, fontSize: 14),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
-
-        // Bandeau recadrage
-        if (_isCropping)
-          Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
-            child: Container(
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppTheme.navyBlue.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                'Recadrage\nDéplacez les bords pour ajuster le cadre',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildConfirmationDialog() {
-    return Container(
-      color: Colors.black54,
-      child: Center(
-        child: Container(
-          margin: EdgeInsets.symmetric(horizontal: 40),
-          padding: EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(AppTheme.borderRadiusLarge),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.crop_rotate,
-                size: 48,
-                color: AppTheme.navyBlue,
-              ),
-              SizedBox(height: 16),
-              Text(
-                'Redressement d\'image',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.navyBlue,
-                ),
-              ),
-              SizedBox(height: 12),
-              Text(
-                'Souhaitez-vous redresser cette image pour une meilleure précision ?',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16),
-              ),
-              SizedBox(height: 24),
-              Row(
+              child: Row(
                 children: [
+                  // Partie scrollable avec les outils (4/5)
                   Expanded(
-                    child: AppTheme.buildSecondaryButton(
-                      label: 'Non',
-                      onPressed: () {
-                        widget.onComplete(widget.image);
-                      },
+                    flex: 4,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        children: [
+                          _buildToolButton(
+                            icon: Icons.straighten,
+                            toolId: 'linear',
+                          ),
+                          SizedBox(width: 8),
+                          _buildToolButton(
+                            icon: Icons.text_fields,
+                            toolId: 'text',
+                          ),
+                          SizedBox(width: 8),
+                          _buildToolButton(
+                            icon: Icons.radio_button_unchecked,
+                            toolId: 'circular',
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  SizedBox(width: 12),
+                  
+                  // Séparateur
+                  Container(
+                    width: 1,
+                    height: 40,
+                    color: Colors.grey[300],
+                  ),
+                  
+                  // Sélecteur de couleur (1/5)
                   Expanded(
-                    child: AppTheme.buildPrimaryButton(
-                      label: 'Oui',
-                      onPressed: () {
-                        setState(() {
-                          _showDialog = false;
-                          _isAdjusting = true;
-                        });
-                      },
+                    flex: 1,
+                    child: InkWell(
+                      onTap: _showColorPicker,
+                      child: Container(
+                        margin: EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: _selectedColor,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Colors.grey[400]!,
+                            width: 2,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
-            ],
+            ),
           ),
+
+      ],
+    );
+  }
+
+  Widget _buildToolButton({
+    required IconData icon,
+    required String toolId,
+  }) {
+    final isSelected = _selectedTool == toolId;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selectedTool = toolId;
+          _tempPoints.clear(); // Réinitialiser les points temporaires
+        });
+      },
+      child: Container(
+        width: 50,
+        height: 50,
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.accentBlue.withOpacity(0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? AppTheme.accentBlue : Colors.grey[300]!,
+            width: 2,
+          ),
+        ),
+        child: Icon(
+          icon,
+          size: 28,
+          color: isSelected ? AppTheme.accentBlue : AppTheme.navyBlue,
         ),
       ),
     );
   }
 
+  void _showColorPicker() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Choisir une couleur'),
+        content: Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            Colors.red,
+            Colors.blue,
+            Colors.green,
+            Colors.orange,
+            Colors.purple,
+            Colors.black,
+            Colors.white,
+            Colors.yellow,
+            Colors.pink,
+          ].map((color) {
+            return InkWell(
+              onTap: () {
+                setState(() {
+                  _selectedColor = color;
+                });
+                Navigator.pop(context);
+              },
+              child: Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: color == _selectedColor ? AppTheme.accentBlue : Colors.grey[400]!,
+                    width: color == _selectedColor ? 3 : 1,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showValueInputDialog() {
+    final valueController = TextEditingController();
+    final nameController = TextEditingController(text: _getNextName());
+    String? selectedPredefined;
+    
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Nouvelle cotation'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Nom
+              DropdownButtonFormField<String>(
+                value: selectedPredefined,
+                decoration: InputDecoration(
+                  labelText: 'Nom',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  DropdownMenuItem(value: null, child: Text('Personnalisé')),
+                  ..._predefinedNames.map((name) => DropdownMenuItem(
+                    value: name,
+                    child: Text(name),
+                  )),
+                ],
+                onChanged: (value) {
+                  setDialogState(() {
+                    selectedPredefined = value;
+                    if (value != null) {
+                      nameController.text = value;
+                    }
+                  });
+                },
+              ),
+              SizedBox(height: 12),
+              TextField(
+                controller: nameController,
+                decoration: InputDecoration(
+                  labelText: selectedPredefined == null ? 'Nom personnalisé' : 'Nom sélectionné',
+                  border: OutlineInputBorder(),
+                ),
+                readOnly: selectedPredefined != null,
+              ),
+              SizedBox(height: 12),
+              // Valeur
+              TextField(
+                controller: valueController,
+                autofocus: true,
+                keyboardType: TextInputType.text,
+                decoration: InputDecoration(
+                  labelText: 'Valeur',
+                  hintText: 'Ex: 150 cm',
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (value) {
+                  if (value.isNotEmpty && nameController.text.isNotEmpty) {
+                    _addLinearMeasurement(valueController.text, nameController.text);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() => _tempPoints.clear());
+                Navigator.pop(context);
+              },
+              child: Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (valueController.text.isNotEmpty && nameController.text.isNotEmpty) {
+                  _addLinearMeasurement(valueController.text, nameController.text);
+                  Navigator.pop(context);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.navyBlue,
+              ),
+              child: Text('Valider', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _addLinearMeasurement(String value) {
+    if (_tempPoints.length == 2) {
+      setState(() {
+        _linearMeasurements.add(LinearMeasurement(
+          point1: _tempPoints[0],
+          point2: _tempPoints[1],
+          value: value,
+          color: _selectedColor,
+        ));
+        _tempPoints.clear();
+      });
+    }
+  }
+
+  bool _isNearMeasurementLine(Offset point, LinearMeasurement measurement) {
+    final p1 = measurement.point1;
+    final p2 = measurement.point2;
+    
+    // Calculer l'angle et l'offset
+    final dx = p2.dx - p1.dx;
+    final dy = p2.dy - p1.dy;
+    final angle = math.atan2(dy, dx);
+    final perpAngle = angle + math.pi / 2;
+    
+    // Position de la ligne de cotation
+    final offsetX = math.cos(perpAngle) * measurement.offset;
+    final offsetY = math.sin(perpAngle) * measurement.offset;
+    final lineStart = Offset(p1.dx + offsetX, p1.dy + offsetY);
+    final lineEnd = Offset(p2.dx + offsetX, p2.dy + offsetY);
+    
+    // Distance du point à la ligne
+    final distance = _distanceToLineSegment(point, lineStart, lineEnd);
+    return distance < 15; // Tolérance de 15px
+  }
+
+  double _distanceToLineSegment(Offset p, Offset a, Offset b) {
+    final dx = b.dx - a.dx;
+    final dy = b.dy - a.dy;
+    final lengthSquared = dx * dx + dy * dy;
+    
+    if (lengthSquared == 0) return (p - a).distance;
+    
+    final t = ((p.dx - a.dx) * dx + (p.dy - a.dy) * dy) / lengthSquared;
+    final tClamped = t.clamp(0.0, 1.0);
+    
+    final projection = Offset(
+      a.dx + tClamped * dx,
+      a.dy + tClamped * dy,
+    );
+    
+    return (p - projection).distance;
+  }
+
   void _handleTapDown(TapDownDetails details) {
     if (_isCropping) {
       _detectCropEdge(details.localPosition);
+    } else if (_isWorking && _selectedTool == 'linear') {
+      // Vérifier si on clique sur une cotation existante pour la déplacer
+      bool clickedOnMeasurement = false;
+      for (int i = 0; i < _linearMeasurements.length; i++) {
+        if (_isNearMeasurementLine(details.localPosition, _linearMeasurements[i])) {
+          clickedOnMeasurement = true;
+          break;
+        }
+      }
+      
+      // Si on n'a pas cliqué sur une cotation existante, ajouter un point
+      if (!clickedOnMeasurement) {
+        setState(() {
+          _tempPoints.add(details.localPosition);
+          _selectedMeasurementIndex = null; // Désélectionner si on crée une nouvelle cotation
+        });
+        
+        // Ouvrir le dialogue après avoir ajouté le 2ème point
+        if (_tempPoints.length == 2) {
+          Future.microtask(() => _showValueInputDialog());
+        }
+      } else {
+        // Sélectionner la cotation cliquée
+        for (int i = 0; i < _linearMeasurements.length; i++) {
+          if (_isNearMeasurementLine(details.localPosition, _linearMeasurements[i])) {
+            setState(() {
+              _selectedMeasurementIndex = i;
+            });
+            break;
+          }
+        }
+      }
     } else if (_perspectivePoints.length < 4) {
       setState(() {
         _perspectivePoints.add(details.localPosition);
@@ -401,6 +722,16 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
   void _handlePanStart(DragStartDetails details) {
     if (_isCropping) {
       _detectCropEdge(details.localPosition);
+    } else if (_isWorking && _selectedTool == 'linear') {
+      // Vérifier si on clique près d'une cotation existante pour la déplacer
+      for (int i = 0; i < _linearMeasurements.length; i++) {
+        if (_isNearMeasurementLine(details.localPosition, _linearMeasurements[i])) {
+          setState(() {
+            _draggingMeasurementIndex = i;
+          });
+          return;
+        }
+      }
     } else {
       final point = details.localPosition;
       for (int i = 0; i < _perspectivePoints.length; i++) {
@@ -434,6 +765,25 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
           }
         }
       });
+    } else if (_draggingMeasurementIndex != null) {
+      // Déplacer la cotation perpendiculairement
+      setState(() {
+        final measurement = _linearMeasurements[_draggingMeasurementIndex!];
+        final p1 = measurement.point1;
+        final p2 = measurement.point2;
+        
+        // Calculer l'angle de la ligne
+        final dx = p2.dx - p1.dx;
+        final dy = p2.dy - p1.dy;
+        final angle = math.atan2(dy, dx);
+        final perpAngle = angle + math.pi / 2;
+        
+        // Projeter le mouvement sur l'axe perpendiculaire
+        final dragDelta = details.localPosition - p1;
+        final perpDistance = dragDelta.dx * math.cos(perpAngle) + dragDelta.dy * math.sin(perpAngle);
+        
+        measurement.offset = perpDistance.clamp(-100.0, 100.0);
+      });
     } else if (_selectedPointIndex != null) {
       setState(() {
         _perspectivePoints[_selectedPointIndex!] = details.localPosition;
@@ -445,6 +795,7 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
     setState(() {
       _selectedPointIndex = null;
       _selectedCropEdge = null;
+      _draggingMeasurementIndex = null;
     });
   }
 
@@ -581,10 +932,37 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
 
       Navigator.pop(context); // Fermer le dialogue de chargement
       
-      // Passer en mode recadrage
+      // Passer en mode recadrage - initialiser les poignées pour encadrer l'image
       setState(() {
         _isAdjusting = false;
         _isCropping = true;
+        _showCropHandles = true;
+        
+        // Calculer les marges initiales pour encadrer l'image
+        final RenderBox? box = context.findRenderObject() as RenderBox?;
+        if (box != null) {
+          final screenSize = box.size;
+          final imageRatio = originalImage.width / originalImage.height;
+          final screenRatio = screenSize.width / screenSize.height;
+          
+          if (imageRatio > screenRatio) {
+            // Image limitée par la largeur
+            final displayHeight = screenSize.width / imageRatio;
+            final offsetY = (screenSize.height - displayHeight) / 2;
+            _cropTop = offsetY + 20;
+            _cropBottom = offsetY + 20;
+            _cropLeft = 20;
+            _cropRight = 20;
+          } else {
+            // Image limitée par la hauteur
+            final displayWidth = screenSize.height * imageRatio;
+            final offsetX = (screenSize.width - displayWidth) / 2;
+            _cropLeft = offsetX + 20;
+            _cropRight = offsetX + 20;
+            _cropTop = 20;
+            _cropBottom = 20;
+          }
+        }
       });
       
       // Mettre à jour l'image du widget parent
@@ -724,6 +1102,11 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
       await tempFile.writeAsBytes(img.encodePng(croppedImage));
 
       Navigator.pop(context); // Fermer le dialogue
+      setState(() {
+        _showCropHandles = false;
+        _isCropping = false;
+        _isWorking = true;
+      });
       widget.onComplete(tempFile);
 
     } catch (e) {
@@ -866,3 +1249,199 @@ class CropHandlesPainter extends CustomPainter {
   @override
   bool shouldRepaint(CropHandlesPainter oldDelegate) => true;
 }
+
+// Classe pour stocker une cotation linéaire
+class LinearMeasurement {
+  final Offset point1;
+  final Offset point2;
+  final String value;
+  final Color color;
+  double offset; // Décalage perpendiculaire (modifiable)
+
+  LinearMeasurement({
+    required this.point1,
+    required this.point2,
+    required this.value,
+    required this.color,
+    this.offset = 20.0,
+  });
+}
+
+// Painter pour dessiner les cotations
+class MeasurementPainter extends CustomPainter {
+  final List<LinearMeasurement> linearMeasurements;
+  final List<Offset> tempPoints;
+  final Color selectedColor;
+  final String? selectedTool;
+  final int? selectedIndex;
+
+  MeasurementPainter({
+    required this.linearMeasurements,
+    required this.tempPoints,
+    required this.selectedColor,
+    this.selectedTool,
+    this.selectedIndex,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Dessiner toutes les cotations linéaires enregistrées
+    for (int i = 0; i < linearMeasurements.length; i++) {
+      final measurement = linearMeasurements[i];
+      _drawLinearMeasurement(
+        canvas,
+        measurement.point1,
+        measurement.point2,
+        measurement.value,
+        measurement.color,
+        measurement.offset,
+        i == selectedIndex,
+      );
+    }
+
+    // Dessiner les points temporaires pendant la sélection
+    if (selectedTool == 'linear' && tempPoints.isNotEmpty) {
+      final pointPaint = Paint()
+        ..color = selectedColor
+        ..style = PaintingStyle.fill;
+      
+      for (var point in tempPoints) {
+        canvas.drawCircle(point, 6, pointPaint);
+      }
+      
+      // Si on a 1 point, dessiner une ligne temporaire jusqu'au curseur si on voulait
+      // Pour l'instant on attend juste le 2ème point
+    }
+  }
+
+  void _drawLinearMeasurement(Canvas canvas, Offset p1, Offset p2, String value, Color color, double offsetDist, bool isSelected) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+
+    final arrowPaint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.fill;
+
+    // Calculer l'angle de la ligne
+    final dx = p2.dx - p1.dx;
+    final dy = p2.dy - p1.dy;
+    final angle = math.atan2(dy, dx);
+    final length = math.sqrt(dx * dx + dy * dy);
+
+    // Décalage perpendiculaire pour la ligne de cotation (utiliser offsetDist au lieu de 20)
+    final perpAngle = angle + math.pi / 2;
+    final offsetX = math.cos(perpAngle) * offsetDist;
+    final offsetY = math.sin(perpAngle) * offsetDist;
+
+    final start = Offset(p1.dx + offsetX, p1.dy + offsetY);
+    final end = Offset(p2.dx + offsetX, p2.dy + offsetY);
+
+    // Dessiner la ligne principale
+    canvas.drawLine(start, end, paint);
+
+    // Dessiner les lignes de rappel (perpendiculaires)
+    final tickLength = 15.0;
+    final tickAngle = perpAngle;
+    
+    // Ligne de rappel point 1
+    final tick1Start = p1;
+    final tick1End = Offset(
+      p1.dx + math.cos(tickAngle) * (offsetDist + tickLength),
+      p1.dy + math.sin(tickAngle) * (offsetDist + tickLength),
+    );
+    canvas.drawLine(tick1Start, tick1End, paint);
+
+    // Ligne de rappel point 2
+    final tick2Start = p2;
+    final tick2End = Offset(
+      p2.dx + math.cos(tickAngle) * (offsetDist + tickLength),
+      p2.dy + math.sin(tickAngle) * (offsetDist + tickLength),
+    );
+    canvas.drawLine(tick2Start, tick2End, paint);
+
+    // Dessiner les flèches
+    final arrowSize = 8.0;
+    _drawArrow(canvas, start, angle, arrowSize, arrowPaint);
+    _drawArrow(canvas, end, angle + math.pi, arrowSize, arrowPaint);
+
+    // Dessiner le texte au centre au-dessus de la ligne
+    final center = Offset((start.dx + end.dx) / 2, (start.dy + end.dy) / 2);
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: value,
+        style: TextStyle(
+          color: color,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    
+    // Positionner le texte au-dessus de la ligne
+    final textOffset = Offset(
+      center.dx - textPainter.width / 2,
+      center.dy - textPainter.height - 5,
+    );
+    
+    // Dessiner le rectangle blanc avec padding autour du texte
+    final padding = 3.0; // Augmentez cette valeur pour agrandir le rectangle
+    final backgroundRect = Rect.fromLTWH(
+      textOffset.dx - padding,
+      textOffset.dy - padding,
+      textPainter.width + padding * 2,
+      textPainter.height + padding * 2,
+    );
+    final backgroundPaint = Paint()
+      ..color = const Color.fromARGB(255, 255, 255, 255)
+      ..style = PaintingStyle.fill;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(backgroundRect, Radius.circular(4)),
+      backgroundPaint,
+    );
+    
+    // Si sélectionné, dessiner un cadre coloré autour
+    if (isSelected) {
+      final selectionPaint = Paint()
+        ..color = const Color.fromARGB(255, 0, 47, 255)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(backgroundRect, Radius.circular(4)),
+        selectionPaint,
+      );
+    }
+    
+    // Dessiner le texte par-dessus
+    textPainter.paint(canvas, textOffset);
+  }
+
+  void _drawArrow(Canvas canvas, Offset tip, double angle, double size, Paint paint) {
+    final path = Path();
+    path.moveTo(tip.dx, tip.dy);
+    path.lineTo(
+      tip.dx - size * math.cos(angle - math.pi / 6),
+      tip.dy - size * math.sin(angle - math.pi / 6),
+    );
+    path.lineTo(
+      tip.dx - size * math.cos(angle + math.pi / 6),
+      tip.dy - size * math.sin(angle + math.pi / 6),
+    );
+    path.close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(MeasurementPainter oldDelegate) {
+    return linearMeasurements != oldDelegate.linearMeasurements ||
+           tempPoints != oldDelegate.tempPoints ||
+           selectedColor != oldDelegate.selectedColor ||
+           selectedTool != oldDelegate.selectedTool ||
+           selectedIndex != oldDelegate.selectedIndex;
+  }
+}
+
