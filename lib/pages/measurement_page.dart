@@ -446,6 +446,161 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
             ),
           ),
 
+        // Bandeau d'édition (en bas quand une cotation est sélectionnée)
+        if (_selectedMeasurementIndex != null && _isWorking)
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 4,
+                    offset: Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      // Nom
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Nom', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            SizedBox(height: 4),
+                            GestureDetector(
+                              onDoubleTap: () {
+                                _showPredefinedNamesDialog();
+                              },
+                              child: Container(
+                                height: 40,
+                                padding: EdgeInsets.symmetric(horizontal: 8),
+                                decoration: BoxDecoration(
+                                  border: Border.all(color: Colors.grey[300]!),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: TextField(
+                                  controller: TextEditingController(text: _linearMeasurements[_selectedMeasurementIndex!].name)
+                                    ..selection = TextSelection.fromPosition(
+                                      TextPosition(offset: _linearMeasurements[_selectedMeasurementIndex!].name.length),
+                                    ),
+                                  decoration: InputDecoration(border: InputBorder.none),
+                                  onChanged: (value) {
+                                    _linearMeasurements[_selectedMeasurementIndex!].name = value;
+                                  },
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      // Valeur
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Valeur', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            SizedBox(height: 4),
+                            Container(
+                              height: 40,
+                              padding: EdgeInsets.symmetric(horizontal: 8),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey[300]!),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: TextField(
+                                controller: TextEditingController(text: _linearMeasurements[_selectedMeasurementIndex!].value)
+                                  ..selection = TextSelection.fromPosition(
+                                    TextPosition(offset: _linearMeasurements[_selectedMeasurementIndex!].value.length),
+                                  ),
+                                decoration: InputDecoration(border: InputBorder.none),
+                                onChanged: (value) {
+                                  _linearMeasurements[_selectedMeasurementIndex!].value = value;
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      // Couleur
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Couleur', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          SizedBox(height: 4),
+                          InkWell(
+                            onTap: () => _showColorPickerForSelected(),
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: _linearMeasurements[_selectedMeasurementIndex!].color,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.grey[400]!),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              // Forcer le repaint pour appliquer les modifications
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Cotation modifiée'), duration: Duration(seconds: 1)),
+                            );
+                          },
+                          icon: Icon(Icons.check, color: Colors.white, size: 18),
+                          label: Text('Modifier', style: TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.navyBlue,
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            setState(() {
+                              _linearMeasurements.removeAt(_selectedMeasurementIndex!);
+                              _selectedMeasurementIndex = null;
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Cotation supprimée'), duration: Duration(seconds: 1)),
+                            );
+                          },
+                          icon: Icon(Icons.delete, color: Colors.white, size: 18),
+                          label: Text('Supprimer', style: TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -624,18 +779,115 @@ class _PerspectiveAdjustmentScreenState extends State<PerspectiveAdjustmentScree
     );
   }
 
-  void _addLinearMeasurement(String value) {
+  void _addLinearMeasurement(String value, String name) {
     if (_tempPoints.length == 2) {
       setState(() {
         _linearMeasurements.add(LinearMeasurement(
           point1: _tempPoints[0],
           point2: _tempPoints[1],
           value: value,
+          name: name,
           color: _selectedColor,
         ));
         _tempPoints.clear();
+        _nameCounter++; // Incrémenter pour le prochain nom auto
       });
     }
+  }
+  
+  String _getNextName() {
+    // Générer A, B, C... Z, AA, AB... etc
+    int counter = _nameCounter;
+    String name = '';
+    do {
+      name = String.fromCharCode(65 + (counter % 26)) + name;
+      counter = (counter ~/ 26) - 1;
+    } while (counter >= 0);
+    return name;
+  }
+  
+  void _showColorPickerForSelected() {
+    if (_selectedMeasurementIndex == null) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Choisir une couleur'),
+        content: Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            Colors.red,
+            Colors.blue,
+            Colors.green,
+            Colors.orange,
+            Colors.purple,
+            Colors.black,
+            Colors.white,
+            Colors.yellow,
+            Colors.pink,
+          ].map((color) {
+            return InkWell(
+              onTap: () {
+                setState(() {
+                  _linearMeasurements[_selectedMeasurementIndex!].color = color;
+                });
+                Navigator.pop(context);
+              },
+              child: Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.grey[400]!,
+                    width: 2,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Fermer'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPredefinedNamesDialog() {
+    if (_selectedMeasurementIndex == null) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Choisir un nom'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _predefinedNames.map((name) {
+            return ListTile(
+              title: Text(name),
+              onTap: () {
+                setState(() {
+                  _linearMeasurements[_selectedMeasurementIndex!].name = name;
+                });
+                Navigator.pop(context);
+              },
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Annuler'),
+          ),
+        ],
+      ),
+    );
   }
 
   bool _isNearMeasurementLine(Offset point, LinearMeasurement measurement) {
@@ -1254,14 +1506,16 @@ class CropHandlesPainter extends CustomPainter {
 class LinearMeasurement {
   final Offset point1;
   final Offset point2;
-  final String value;
-  final Color color;
+  String value; // Modifiable
+  String name; // Nom de la cotation
+  Color color; // Modifiable
   double offset; // Décalage perpendiculaire (modifiable)
 
   LinearMeasurement({
     required this.point1,
     required this.point2,
     required this.value,
+    required this.name,
     required this.color,
     this.offset = 20.0,
   });
@@ -1329,7 +1583,6 @@ class MeasurementPainter extends CustomPainter {
     final dx = p2.dx - p1.dx;
     final dy = p2.dy - p1.dy;
     final angle = math.atan2(dy, dx);
-    final length = math.sqrt(dx * dx + dy * dy);
 
     // Décalage perpendiculaire pour la ligne de cotation (utiliser offsetDist au lieu de 20)
     final perpAngle = angle + math.pi / 2;
@@ -1373,7 +1626,7 @@ class MeasurementPainter extends CustomPainter {
       text: TextSpan(
         text: value,
         style: TextStyle(
-          color: color,
+          color: Colors.black,
           fontSize: 14,
           fontWeight: FontWeight.bold,
         ),
